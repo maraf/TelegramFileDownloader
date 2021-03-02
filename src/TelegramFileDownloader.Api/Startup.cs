@@ -1,24 +1,34 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Telegram.Bot;
+using Telegram.Bot.Types;
 
 namespace TelegramFileDownloader.Api
 {
     public class Startup
     {
-        // This method gets called by the runtime. Use this method to add services to the container.
-        // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
-        public void ConfigureServices(IServiceCollection services)
+        private static TelegramBotClient client;
+        private readonly IConfiguration configuration;
+
+        public Startup(IConfiguration configuration)
         {
+            this.configuration = configuration;
         }
 
-        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            string token = configuration.GetValue<string>("Telegram:Token");
+            client = new TelegramBotClient(token);
+        }
+
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
             if (env.IsDevelopment())
@@ -32,9 +42,36 @@ namespace TelegramFileDownloader.Api
             {
                 endpoints.MapGet("/", async context =>
                 {
-                    await context.Response.WriteAsync("Hello World!");
+                    var me = await client.GetMeAsync();
+                    await context.Response.WriteAsync($"Hello, World! I am user {me.Id} and my name is {me.FirstName}.");
+                });
+
+                endpoints.MapGet("/latest-image", async context =>
+                {
+                    var updates = await client.GetUpdatesAsync();
+                    if (updates.Length == 0)
+                    {
+                        context.Response.StatusCode = 404;
+                        return;
+                    }
+
+                    var message = updates.Last().Message;
+                    if (message.Photo == null && message.Photo.Length == 0)
+                    {
+                        context.Response.StatusCode = 404;
+                        return;
+                    }
+
+                    string fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
+                    await DownloadFileAsync(context, fileId);
                 });
             });
+        }
+
+        private static async Task DownloadFileAsync(HttpContext context, string fileId)
+        {
+            var file = await client.GetFileAsync(fileId);
+            await client.DownloadFileAsync(file.FilePath, context.Response.Body);
         }
     }
 }
