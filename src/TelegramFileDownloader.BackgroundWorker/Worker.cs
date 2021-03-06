@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Neptuo;
+using Neptuo.FileSystems;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -29,6 +31,12 @@ namespace TelegramFileDownloader
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
+            var assemblyName = GetType().Assembly.GetName();
+            log.LogInformation("Running '{app}' version '{version}'.", assemblyName.Name, assemblyName.Version.ToString(3));
+
+            Ensure.Condition.DirectoryExists(options.RootPath, "rootPath");
+            log.LogInformation("Storing files to '{rootPath}'.", options.RootPath);
+
             client.OnMessage += OnMessage;
             client.StartReceiving(cancellationToken: cancellationToken);
 
@@ -43,7 +51,11 @@ namespace TelegramFileDownloader
 
         private async Task ProcessUpdatesAsync()
         {
+            log.LogDebug("Getting updates...");
+
             var updates = await client.GetUpdatesAsync();
+            log.LogInformation("Found '{updates}' updates.", updates.Length);
+
             foreach (var update in updates)
                 await SaveFileFromMessageAsync(update.Message);
         }
@@ -54,15 +66,22 @@ namespace TelegramFileDownloader
                 return;
 
             string fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
+            log.LogInformation("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
+
             await SaveFileAsync(fileId);
         }
 
         private async Task SaveFileAsync(string fileId)
         {
             var file = await client.GetFileAsync(fileId);
-            var filePath = Path.Combine(options.RootPath, Path.GetFileName(file.FilePath));
+            var fileName = Path.GetFileName(file.FilePath);
+            var filePath = Path.Combine(options.RootPath, fileName);
+            log.LogInformation("Saving file '{fileName}'...", fileName);
+
             using (var fileContent = IoFile.OpenWrite(filePath))
                 await client.DownloadFileAsync(file.FilePath, fileContent);
+
+            log.LogInformation("Saving file '{fileName}' completed.", fileName);
         }
 
         private void OnMessage(object sender, MessageEventArgs e)
