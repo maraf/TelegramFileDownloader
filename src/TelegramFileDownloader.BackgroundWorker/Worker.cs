@@ -37,14 +37,17 @@ namespace TelegramFileDownloader
             Ensure.Condition.DirectoryExists(options.RootPath, "rootPath");
             log.LogInformation("Storing files to '{rootPath}'.", options.RootPath);
 
+            log.LogInformation("Start receiving messages.");
             client.OnMessage += OnMessage;
             client.StartReceiving(cancellationToken: cancellationToken);
 
-            await ProcessUpdatesAsync();
+            //await ProcessUpdatesAsync();
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
+            log.LogInformation("Stop receiving messages.");
+
             client.StopReceiving();
             return Task.CompletedTask;
         }
@@ -62,13 +65,20 @@ namespace TelegramFileDownloader
 
         private async Task SaveFileFromMessageAsync(Message message)
         {
-            if (message.Photo == null || message.Photo.Length == 0)
-                return;
+            try
+            {
+                if (message.Photo == null || message.Photo.Length == 0)
+                    return;
 
-            string fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
-            log.LogInformation("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
+                string fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
+                log.LogInformation("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
 
-            await SaveFileAsync(fileId);
+                await SaveFileAsync(fileId);
+            }
+            catch (Exception e)
+            {
+                log.LogError(e, "Save file failed for message '{messageId}'.", message.MessageId);
+            }
         }
 
         private async Task SaveFileAsync(string fileId)
@@ -86,6 +96,7 @@ namespace TelegramFileDownloader
 
         private void OnMessage(object sender, MessageEventArgs e)
         {
+            log.LogInformation("New message '{messageId}' arrived.", e.Message.MessageId);
             _ = SaveFileFromMessageAsync(e.Message);
         }
     }
