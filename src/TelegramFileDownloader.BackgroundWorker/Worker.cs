@@ -7,11 +7,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Telegram.Bot;
 using Telegram.Bot.Args;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 using IoFile = System.IO.File;
 
 namespace TelegramFileDownloader
@@ -23,6 +25,7 @@ namespace TelegramFileDownloader
         private readonly StorageOptions storageOptions;
         private readonly TelegramOptions telegramOptions;
         private readonly Synchronizer synchronizer;
+        private readonly HttpClient httpClient = new HttpClient();
 
         public Worker(ILogger<Worker> log, TelegramBotClient client, IOptions<StorageOptions> storageOptions, IOptions<TelegramOptions> telegramOptions, Synchronizer synchronizer)
         {
@@ -58,6 +61,7 @@ namespace TelegramFileDownloader
             Info("Stop receiving messages.");
 
             client.StopReceiving();
+            httpClient.Dispose();
             return Task.CompletedTask;
         }
 
@@ -82,30 +86,28 @@ namespace TelegramFileDownloader
                     return;
                 }
 
-                string fileId = null;
-                string fileName = message.Caption;
+                Task SaveAsync(string fileId, string fileName = null)
+                {
+                    Info("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
+                    return SaveFromFileAsync(fileId, fileName ?? message.Caption);
+                }
+
                 switch (message.Type)
                 {
-                    case Telegram.Bot.Types.Enums.MessageType.Photo:
-                        fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
+                    case MessageType.Photo:
+                        await SaveAsync(message.Photo.OrderByDescending(p => p.Width).First().FileId);
                         break;
-                    case Telegram.Bot.Types.Enums.MessageType.Document:
-                        if (telegramOptions.AllowedFileTypes == null || telegramOptions.AllowedFileTypes.Contains(message.Document.MimeType))
-                        {
-                            fileId = message.Document.FileId;
-                        }
-
+                    case MessageType.Document when IsAllowedType(message.Document.MimeType):
+                        await SaveAsync(message.Document.FileId);
+                        break;
+                    case MessageType.Text when Uri.TryCreate(message.Text, UriKind.Absolute, out var url):
+                        Info("Download '{url}' from message id '{messageId}'.", url.ToString(), message.MessageId);
+                        await SaveFromUrlAsync(url.ToString());
+                        break;
+                    default:
+                        Info("Message '{messageId}' skipped, because it doesn't contain file or the file is not of supported type.", message.MessageId);
                         break;
                 }
-
-                if (fileId == null)
-                {
-                    Info("Message '{messageId}' skipped, because it doesn't contain file or the file is not of supported type.", message.MessageId);
-                    return;
-                }
-
-                Info("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
-                await SaveFileAsync(fileId, fileName);
             }
             catch (Exception e)
             {
@@ -113,29 +115,45 @@ namespace TelegramFileDownloader
             }
         }
 
-        private async Task SaveFileAsync(string fileId, string fileName = null)
+        private bool IsAllowedType(string mimeType)
+            => telegramOptions.AllowedFileTypes == null || telegramOptions.AllowedFileTypes.Contains(mimeType);
+
+        private string GetFilePath(string url, ref string fileName)
+        {
+            if (fileName != null)
+            {
+                if (String.IsNullOrEmpty(Path.GetExtension(fileName)))
+                    fileName += Path.GetExtension(url);
+            }
+            else
+            {
+                fileName = Path.GetFileName(url);
+            }
+
+            return Path.Combine(storageOptions.RootPath, fileName);
+        }
+
+        private bool EnsureFileSize(string fileIdentifier, long? fileSize)
+        {
+            if (telegramOptions.AllowedFileSize != null && (fileSize == null || fileSize > telegramOptions.AllowedFileSize.Value))
+            {
+                Info("Selected file '{fileId}' of size '{fileSize}B' exceeds max allowed size '{maxSize}B'.", fileIdentifier, fileSize, telegramOptions.AllowedFileSize.Value);
+                return false;
+            }
+
+            return true;
+        }
+
+        private async Task SaveFromFileAsync(string fileId, string fileName = null)
         {
             var file = await client.GetFileAsync(fileId);
             if (file == null)
                 return;
 
-            if (telegramOptions.AllowedFileSize != null && file.FileSize > telegramOptions.AllowedFileSize.Value)
-            {
-                Info("Selected file '{fileId}' of size '{fileSize}B' exceeds max allowed size '{maxSize}B'.", fileId, file.FileSize, telegramOptions.AllowedFileSize.Value);
+            if (!EnsureFileSize(fileId, file.FileSize))
                 return;
-            }
 
-            if (fileName != null)
-            {
-                if (String.IsNullOrEmpty(Path.GetExtension(fileName)))
-                    fileName += Path.GetExtension(file.FilePath);
-            }
-            else
-            {
-                fileName = Path.GetFileName(file.FilePath);
-            }
-
-            var filePath = Path.Combine(storageOptions.RootPath, fileName);
+            string filePath = GetFilePath(file.FilePath, ref fileName);
             Info("Saving file '{fileName}'...", fileName);
 
             try
@@ -151,6 +169,28 @@ namespace TelegramFileDownloader
             {
                 synchronizer.Relese(filePath);
             }
+        }
+
+        private async Task SaveFromUrlAsync(string url, string fileName = null)
+        {
+            var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            string mediaType = response.Content.Headers.ContentType.MediaType;
+            if (!IsAllowedType(mediaType))
+            {
+                Info("Not support file type '{mimeType}' on '{url}'.", mediaType, url);
+                return;
+            }
+
+            if (!EnsureFileSize(url, response.Content.Headers.ContentLength))
+                return;
+
+            string filePath = GetFilePath(url, ref fileName);
+            Info("Saving file '{fileName}'...", fileName);
+
+            using (var fileContent = IoFile.OpenWrite(filePath))
+                await response.Content.CopyToAsync(fileContent);
+
+            Info("Saving file '{fileName}' completed.", fileName);
         }
 
         private void OnMessage(object sender, MessageEventArgs e)
