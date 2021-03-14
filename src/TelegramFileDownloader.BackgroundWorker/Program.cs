@@ -30,6 +30,7 @@ namespace TelegramFileDownloader
                 {
                     services.Configure<StorageOptions>(hostContext.Configuration.GetSection("Storage"));
                     services.Configure<TelegramOptions>(hostContext.Configuration.GetSection("Telegram"));
+                    services.AddTransient<Synchronizer>();
                     services.AddTransient(s => new TelegramBotClient(s.GetRequiredService<IOptions<TelegramOptions>>().Value.Token));
                     services.AddHostedService<Worker>();
                 });

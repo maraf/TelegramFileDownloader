@@ -22,17 +22,21 @@ namespace TelegramFileDownloader
         private readonly TelegramBotClient client;
         private readonly StorageOptions storageOptions;
         private readonly TelegramOptions telegramOptions;
+        private readonly Synchronizer synchronizer;
 
-        public Worker(ILogger<Worker> log, TelegramBotClient client, IOptions<StorageOptions> storageOptions, IOptions<TelegramOptions> telegramOptions)
+        public Worker(ILogger<Worker> log, TelegramBotClient client, IOptions<StorageOptions> storageOptions, IOptions<TelegramOptions> telegramOptions, Synchronizer synchronizer)
         {
             this.log = log;
             this.client = client;
             this.client = client;
             this.storageOptions = storageOptions.Value;
             this.telegramOptions = telegramOptions.Value;
+            this.synchronizer = synchronizer;
         }
 
-        private void Info(string message, params object[] parameters) => Info(message, parameters);
+        private void Debug(string message, params object[] parameters) => log.LogDebug(message, parameters);
+        private void Info(string message, params object[] parameters) => log.LogInformation(message, parameters);
+        private void Error(Exception e, string message, params object[] parameters) => log.LogError(e, message, parameters);
 
         public async Task StartAsync(CancellationToken cancellationToken)
         {
@@ -59,7 +63,7 @@ namespace TelegramFileDownloader
 
         private async Task ProcessUpdatesAsync()
         {
-            log.LogDebug("Getting updates...");
+            Debug("Getting updates...");
 
             var updates = await client.GetUpdatesAsync();
             Info("Found '{updates}' updates.", updates.Length);
@@ -102,7 +106,7 @@ namespace TelegramFileDownloader
             }
             catch (Exception e)
             {
-                log.LogError(e, "Save file failed for message '{messageId}'.", message.MessageId);
+                Error(e, "Save file failed for message '{messageId}'.", message.MessageId);
             }
         }
 
@@ -122,10 +126,19 @@ namespace TelegramFileDownloader
             var filePath = Path.Combine(storageOptions.RootPath, fileName);
             Info("Saving file '{fileName}'...", fileName);
 
-            using (var fileContent = IoFile.OpenWrite(filePath))
-                await client.DownloadFileAsync(file.FilePath, fileContent);
+            try
+            {
+                await synchronizer.WaitAsync(filePath);
 
-            Info("Saving file '{fileName}' completed.", fileName);
+                using (var fileContent = IoFile.OpenWrite(filePath))
+                    await client.DownloadFileAsync(file.FilePath, fileContent);
+
+                Info("Saving file '{fileName}' completed.", fileName);
+            }
+            finally
+            {
+                synchronizer.Relese(filePath);
+            }
         }
 
         private void OnMessage(object sender, MessageEventArgs e)
