@@ -32,15 +32,17 @@ namespace TelegramFileDownloader
             this.telegramOptions = telegramOptions.Value;
         }
 
+        private void Info(string message, params object[] parameters) => Info(message, parameters);
+
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             var assemblyName = GetType().Assembly.GetName();
-            log.LogInformation("Running '{app}' version '{version}'.", assemblyName.Name, assemblyName.Version.ToString(3));
+            Info("Running '{app}' version '{version}'.", assemblyName.Name, assemblyName.Version.ToString(3));
 
             Ensure.Condition.DirectoryExists(storageOptions.RootPath, "rootPath");
-            log.LogInformation("Storing files to '{rootPath}'.", storageOptions.RootPath);
+            Info("Storing files to '{rootPath}'.", storageOptions.RootPath);
 
-            log.LogInformation("Start receiving messages.");
+            Info("Start receiving messages.");
             client.OnMessage += OnMessage;
             client.StartReceiving(cancellationToken: cancellationToken);
 
@@ -49,7 +51,7 @@ namespace TelegramFileDownloader
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            log.LogInformation("Stop receiving messages.");
+            Info("Stop receiving messages.");
 
             client.StopReceiving();
             return Task.CompletedTask;
@@ -60,7 +62,7 @@ namespace TelegramFileDownloader
             log.LogDebug("Getting updates...");
 
             var updates = await client.GetUpdatesAsync();
-            log.LogInformation("Found '{updates}' updates.", updates.Length);
+            Info("Found '{updates}' updates.", updates.Length);
 
             foreach (var update in updates)
                 await SaveFileFromMessageAsync(update.Message);
@@ -72,7 +74,7 @@ namespace TelegramFileDownloader
             {
                 if (telegramOptions.AllowedSenderId != null && !telegramOptions.AllowedSenderId.Contains(message.From.Id))
                 {
-                    log.LogInformation($"Message '{message.MessageId}' skipped, because sender '{message.From.Id}' is not allowed.");
+                    Info($"Message '{message.MessageId}' skipped, because sender '{message.From.Id}' is not allowed.");
                     return;
                 }
 
@@ -83,17 +85,19 @@ namespace TelegramFileDownloader
                         fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
                         break;
                     case Telegram.Bot.Types.Enums.MessageType.Document:
-                        fileId = message.Document.FileId;
+                        if (telegramOptions.AllowedFileTypes == null || telegramOptions.AllowedFileTypes.Contains(message.Document.MimeType))
+                            fileId = message.Document.FileId;
+
                         break;
                 }
 
                 if (fileId == null)
                 {
-                    log.LogInformation($"Message '{message.MessageId}' skipped, because it doesn't contain file.");
+                    Info("Message '{messageId}' skipped, because it doesn't contain file or the file is not of supported type.", message.MessageId);
                     return;
                 }
 
-                log.LogInformation("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
+                Info("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
                 await SaveFileAsync(fileId);
             }
             catch (Exception e)
@@ -105,19 +109,28 @@ namespace TelegramFileDownloader
         private async Task SaveFileAsync(string fileId)
         {
             var file = await client.GetFileAsync(fileId);
+            if (file == null)
+                return;
+
+            if (telegramOptions.AllowedFileSize != null && file.FileSize > telegramOptions.AllowedFileSize.Value)
+            {
+                Info("Selected file '{fileId}' of size '{fileSize}B' exceeds max allowed size '{maxSize}B'.", fileId, file.FileSize, telegramOptions.AllowedFileSize.Value);
+                return;
+            }
+
             var fileName = Path.GetFileName(file.FilePath);
             var filePath = Path.Combine(storageOptions.RootPath, fileName);
-            log.LogInformation("Saving file '{fileName}'...", fileName);
+            Info("Saving file '{fileName}'...", fileName);
 
             using (var fileContent = IoFile.OpenWrite(filePath))
                 await client.DownloadFileAsync(file.FilePath, fileContent);
 
-            log.LogInformation("Saving file '{fileName}' completed.", fileName);
+            Info("Saving file '{fileName}' completed.", fileName);
         }
 
         private void OnMessage(object sender, MessageEventArgs e)
         {
-            log.LogInformation("New message '{messageId}' arrived.", e.Message.MessageId);
+            Info("New message '{messageId}' arrived.", e.Message.MessageId);
             _ = SaveFileFromMessageAsync(e.Message);
         }
     }

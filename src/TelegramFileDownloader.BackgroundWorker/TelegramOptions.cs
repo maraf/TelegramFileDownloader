@@ -11,5 +11,7 @@ namespace TelegramFileDownloader
     {
         public string Token { get; set; }
         public List<int> AllowedSenderId { get; set; }
+        public List<string> AllowedFileTypes { get; set; }
+        public int? AllowedFileSize { get; set; }
     }
 }
