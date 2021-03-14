@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,7 +29,8 @@ namespace TelegramFileDownloader
                 .ConfigureServices((hostContext, services) =>
                 {
                     services.Configure<StorageOptions>(hostContext.Configuration.GetSection("Storage"));
-                    services.AddTransient(s => new TelegramBotClient(s.GetRequiredService<IConfiguration>().GetValue<string>("Telegram:Token")));
+                    services.Configure<TelegramOptions>(hostContext.Configuration.GetSection("Telegram"));
+                    services.AddTransient(s => new TelegramBotClient(s.GetRequiredService<IOptions<TelegramOptions>>().Value.Token));
                     services.AddHostedService<Worker>();
                 });
     }

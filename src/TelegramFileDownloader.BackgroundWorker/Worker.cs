@@ -20,13 +20,16 @@ namespace TelegramFileDownloader
     {
         private readonly ILogger<Worker> log;
         private readonly TelegramBotClient client;
-        private readonly StorageOptions options;
+        private readonly StorageOptions storageOptions;
+        private readonly TelegramOptions telegramOptions;
 
-        public Worker(ILogger<Worker> log, TelegramBotClient client, IOptions<StorageOptions> options)
+        public Worker(ILogger<Worker> log, TelegramBotClient client, IOptions<StorageOptions> storageOptions, IOptions<TelegramOptions> telegramOptions)
         {
             this.log = log;
             this.client = client;
-            this.options = options.Value;
+            this.client = client;
+            this.storageOptions = storageOptions.Value;
+            this.telegramOptions = telegramOptions.Value;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -34,8 +37,8 @@ namespace TelegramFileDownloader
             var assemblyName = GetType().Assembly.GetName();
             log.LogInformation("Running '{app}' version '{version}'.", assemblyName.Name, assemblyName.Version.ToString(3));
 
-            Ensure.Condition.DirectoryExists(options.RootPath, "rootPath");
-            log.LogInformation("Storing files to '{rootPath}'.", options.RootPath);
+            Ensure.Condition.DirectoryExists(storageOptions.RootPath, "rootPath");
+            log.LogInformation("Storing files to '{rootPath}'.", storageOptions.RootPath);
 
             log.LogInformation("Start receiving messages.");
             client.OnMessage += OnMessage;
@@ -67,12 +70,30 @@ namespace TelegramFileDownloader
         {
             try
             {
-                if (message.Photo == null || message.Photo.Length == 0)
+                if (telegramOptions.AllowedSenderId != null && !telegramOptions.AllowedSenderId.Contains(message.From.Id))
+                {
+                    log.LogInformation($"Message '{message.MessageId}' skipped, because sender '{message.From.Id}' is not allowed.");
                     return;
+                }
 
-                string fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
+                string fileId = null;
+                switch (message.Type)
+                {
+                    case Telegram.Bot.Types.Enums.MessageType.Photo:
+                        fileId = message.Photo.OrderByDescending(p => p.Width).First().FileId;
+                        break;
+                    case Telegram.Bot.Types.Enums.MessageType.Document:
+                        fileId = message.Document.FileId;
+                        break;
+                }
+
+                if (fileId == null)
+                {
+                    log.LogInformation($"Message '{message.MessageId}' skipped, because it doesn't contain file.");
+                    return;
+                }
+
                 log.LogInformation("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
-
                 await SaveFileAsync(fileId);
             }
             catch (Exception e)
@@ -85,7 +106,7 @@ namespace TelegramFileDownloader
         {
             var file = await client.GetFileAsync(fileId);
             var fileName = Path.GetFileName(file.FilePath);
-            var filePath = Path.Combine(options.RootPath, fileName);
+            var filePath = Path.Combine(storageOptions.RootPath, fileName);
             log.LogInformation("Saving file '{fileName}'...", fileName);
 
             using (var fileContent = IoFile.OpenWrite(filePath))

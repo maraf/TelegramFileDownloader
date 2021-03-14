@@ -5,6 +5,7 @@
     <UserSecretsId>dotnet-TelegramFileDownloader.BackgroundWorker-107F04EC-06ED-4F05-8191-28E7DFB4F7BE</UserSecretsId>
     <AssemblyName>tfd-daemon</AssemblyName>
     <Version>1.0.0</Version>
+    <RootNamespace>TelegramFileDownloader</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
