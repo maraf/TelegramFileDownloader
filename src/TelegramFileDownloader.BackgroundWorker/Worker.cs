@@ -83,6 +83,7 @@ namespace TelegramFileDownloader
                 }
 
                 string fileId = null;
+                string fileName = message.Caption;
                 switch (message.Type)
                 {
                     case Telegram.Bot.Types.Enums.MessageType.Photo:
@@ -90,7 +91,9 @@ namespace TelegramFileDownloader
                         break;
                     case Telegram.Bot.Types.Enums.MessageType.Document:
                         if (telegramOptions.AllowedFileTypes == null || telegramOptions.AllowedFileTypes.Contains(message.Document.MimeType))
+                        {
                             fileId = message.Document.FileId;
+                        }
 
                         break;
                 }
@@ -102,7 +105,7 @@ namespace TelegramFileDownloader
                 }
 
                 Info("Save file id '{fileId}' from message id '{messageId}'.", fileId, message.MessageId);
-                await SaveFileAsync(fileId);
+                await SaveFileAsync(fileId, fileName);
             }
             catch (Exception e)
             {
@@ -110,7 +113,7 @@ namespace TelegramFileDownloader
             }
         }
 
-        private async Task SaveFileAsync(string fileId)
+        private async Task SaveFileAsync(string fileId, string fileName = null)
         {
             var file = await client.GetFileAsync(fileId);
             if (file == null)
@@ -122,7 +125,16 @@ namespace TelegramFileDownloader
                 return;
             }
 
-            var fileName = Path.GetFileName(file.FilePath);
+            if (fileName != null)
+            {
+                if (String.IsNullOrEmpty(Path.GetExtension(fileName)))
+                    fileName += Path.GetExtension(file.FilePath);
+            }
+            else
+            {
+                fileName = Path.GetFileName(file.FilePath);
+            }
+
             var filePath = Path.Combine(storageOptions.RootPath, fileName);
             Info("Saving file '{fileName}'...", fileName);
 
