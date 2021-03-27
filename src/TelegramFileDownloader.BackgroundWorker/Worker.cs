@@ -39,6 +39,7 @@ namespace TelegramFileDownloader
 
         private void Debug(string message, params object[] parameters) => log.LogDebug(message, parameters);
         private void Info(string message, params object[] parameters) => log.LogInformation(message, parameters);
+        private void Warning(string message, params object[] parameters) => log.LogWarning(message, parameters);
         private void Error(Exception e, string message, params object[] parameters) => log.LogError(e, message, parameters);
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -159,6 +160,9 @@ namespace TelegramFileDownloader
             try
             {
                 await synchronizer.WaitAsync(filePath);
+
+                if (IoFile.Exists(filePath))
+                    Warning("File '{filename}' already exists, overriding...", fileName);
 
                 using (var fileContent = IoFile.OpenWrite(filePath))
                     await client.DownloadFileAsync(file.FilePath, fileContent);
