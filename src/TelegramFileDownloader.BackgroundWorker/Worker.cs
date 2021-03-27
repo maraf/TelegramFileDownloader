@@ -154,7 +154,7 @@ namespace TelegramFileDownloader
             if (!EnsureFileSize(fileId, file.FileSize))
                 return;
 
-            string filePath = GetFilePath(file.FilePath, ref fileName);
+            string filePath = GetFilePath(file.FileUniqueId + Path.GetExtension(file.FilePath), ref fileName);
             Info("Saving file '{fileName}'...", fileName);
 
             try
